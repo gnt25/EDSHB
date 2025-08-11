@@ -10,4 +10,196 @@
   canvas { background: #cce6ff; border: 2px solid #0077b6; border-radius: 10px; }
   .small { font-size: 13px; color: #333; line-height: 1.5; text-align: left; white-space: pre-line; }
   .result-line { margin-top: 6px; text-align: left; }
-  input { padding: 8px 14px; border: 1px solid #ccc; border-radius: 8px; margin-top: 5px; width: 120px;
+  input { padding: 8px 14px; border: 1px solid #ccc; border-radius: 8px; margin-top: 5px; width: 120px; text-align: right; }
+  .watermark { position: absolute; top: 10px; right: 10px; font-size: 20px; font-weight: bold; text-transform: lowercase; color: rgba(0, 119, 182, 0.15); transform: rotate(-20deg); pointer-events: none; }
+</style>
+</head>
+<body>
+<h1>Эгц дээш шидсэн биеийн симулятор</h1>
+
+<div class="container">
+  <!-- Зүүн талын самбар -->
+  <div class="panel">
+    <label class="small">g (м/с²):</label>
+    <input id="inG" type="number" step="any" value="9.81"><br/>
+    <label class="small">Эхний хурд v₀ (м/с):</label>
+    <input id="inV0" type="number" step="any" value="20"><br/>
+
+    <button id="btnStart" style="margin-top:8px">Тооцоолох</button>
+    <button id="btnContinue" style="margin-top:8px; display:none;">Үргэлжлүүлэх</button>
+
+    <div id="calcOut" class="small" style="margin-top:12px"></div>
+
+    <div class="small" style="margin-top:8px; font-weight:bold;">Бодолт</div>
+    <div id="formulaOut" class="small" style="margin-top:4px;"></div>
+  </div>
+
+  <!-- Баруун талын canvas -->
+  <div class="panel" style="padding:0">
+    <div class="watermark">gnt</div>
+    <canvas id="simCanvas" width="360" height="460"></canvas>
+  </div>
+</div>
+
+<script>
+/* ----- Параметр ба төлөв ----- */
+let g = 9.81, v0 = 20;     // g ба эхний хурд
+const R = 16;              // бөмбөгний радиус (px)
+let y_m, v, t, running = false, lastTS = null, pxPerM = 20;
+let pausedAtApex = false, fallingPhase = false;
+
+const canvas = document.getElementById('simCanvas');
+const ctx = canvas.getContext('2d');
+const groundY = canvas.height - 40; // дэлгэц дээрх газрын y(px)
+
+/* y_m = метрээр газар дээрх өндрөөс дээш чиглэл эерэг.
+   Дэлгэц рүү буулгах: y_px = groundY - y_m * pxPerM  */
+
+/* ----- Туслах функцууд ----- */
+function drawScene(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // усан-хээ лого
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = '#0077b6';
+  ctx.font = 'bold 28px Arial';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillText('gnt', canvas.width - 10, 10);
+  ctx.restore();
+
+  // газар
+  ctx.fillStyle = '#7cc27c';
+  ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+  ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.strokeStyle='#2f6e2f'; ctx.stroke();
+
+  // бөмбөг
+  const y_px = groundY - y_m * pxPerM;
+  ctx.beginPath(); ctx.arc(canvas.width/2, y_px, R, 0, Math.PI*2);
+  ctx.fillStyle = '#ff6b6b'; ctx.fill(); ctx.strokeStyle='#333'; ctx.stroke();
+
+  // хурдны вектор v(t): v>0 дээш, v<0 доош
+  const vLenPx = Math.abs(v) * pxPerM * 0.4;
+  if (vLenPx > 1) {
+    ctx.strokeStyle = '#005a9e'; ctx.fillStyle = '#005a9e'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (v > 0) { // дээш
+      ctx.moveTo(canvas.width/2 - 40, y_px);
+      ctx.lineTo(canvas.width/2 - 40, y_px - vLenPx);
+    } else {     // доош
+      ctx.moveTo(canvas.width/2 - 40, y_px);
+      ctx.lineTo(canvas.width/2 - 40, y_px + vLenPx);
+    }
+    ctx.stroke();
+    // сумны үзүүр
+    ctx.beginPath();
+    if (v > 0) {
+      ctx.moveTo(canvas.width/2 - 45, y_px - vLenPx + 6);
+      ctx.lineTo(canvas.width/2 - 40, y_px - vLenPx);
+      ctx.lineTo(canvas.width/2 - 35, y_px - vLenPx + 6);
+    } else {
+      ctx.moveTo(canvas.width/2 - 45, y_px + vLenPx - 6);
+      ctx.lineTo(canvas.width/2 - 40, y_px + vLenPx);
+      ctx.lineTo(canvas.width/2 - 35, y_px + vLenPx - 6);
+    }
+    ctx.fill();
+    ctx.font = '13px Arial';
+    const labelYOffset = (v>0 ? -vLenPx/2 : vLenPx/2);
+    ctx.fillText(`v(t) = ${v.toFixed(2)} м/с`, canvas.width/2 - 120, y_px + labelYOffset);
+  }
+
+  // g хурдатгал (тогтмол доош)
+  const gLenPx = g * pxPerM * 0.2;
+  ctx.strokeStyle = '#222'; ctx.fillStyle='#222'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(canvas.width/2 + 40, y_px); ctx.lineTo(canvas.width/2 + 40, y_px + gLenPx); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(canvas.width/2 + 35, y_px + gLenPx - 6); ctx.lineTo(canvas.width/2 + 40, y_px + gLenPx); ctx.lineTo(canvas.width/2 + 45, y_px + gLenPx - 6); ctx.fill();
+  ctx.font = '13px Arial'; ctx.fillText(`g = ${g.toFixed(2)} м/с²`, canvas.width/2 + 52, y_px + gLenPx/2);
+}
+
+function step(ts){
+  if(!lastTS) lastTS = ts;
+  const dt = Math.min(0.05, (ts - lastTS)/1000); // 50ms cap
+  lastTS = ts;
+
+  // Физик: a = -g, v' = -g, y' = v (м, с, м/с)
+  v += -g * dt;
+  y_m += v * dt;
+
+  // Оргил: v<=0 үед зогсооно (анхны фазад)
+  if (!fallingPhase && v <= 0) {
+    v = 0;
+    pausedAtApex = true;
+    running = false;
+    document.getElementById('btnContinue').style.display = 'inline-block';
+  }
+
+  // Газарт хүрэх
+  if (fallingPhase && y_m <= 0 && v < 0) {
+    y_m = 0;
+    v = 0;
+    running = false;
+  }
+
+  drawScene();
+  if (running) requestAnimationFrame(step);
+}
+
+function start(){
+  // Оролтууд
+  g = parseFloat(document.getElementById('inG').value) || 9.81;
+  v0 = parseFloat(document.getElementById('inV0').value) || 10;
+
+  // Хэмжээсүүд
+  const hMax = (v0*v0)/(2*g);
+  const tUp = v0/g;
+  const tDown = 2 * tUp; // таны хүсэлтээр 2× гэж харуулж байна
+
+  document.getElementById('calcOut').innerHTML =
+    `<div class='result-line'>Хөөрөх өндөр: ${hMax.toFixed(2)} м</div>`+
+    `<div class='result-line'>Хөөрөх хугацаа: ${tUp.toFixed(2)} с</div>`+
+    `<div class='result-line'>Унах хугацаа: ${tDown.toFixed(2)} с</div>`;
+
+  document.getElementById('formulaOut').innerHTML =
+    `hₘₐₓ = v₀²/(2g) = ${v0}²/(2×${g}) = ${hMax.toFixed(2)} м\n`+
+    `t_өрг = v₀/g = ${v0}/${g} = ${tUp.toFixed(2)} с\n`+
+    `t_унах = 2 × t_өрг = 2 × ${tUp.toFixed(2)} = ${tDown.toFixed(2)} с`;
+
+  // Масштаб: оргил өндөр бүрэн багтахаар
+  const usablePx = (groundY - 60);
+  pxPerM = Math.max(5, usablePx / Math.max(0.1, hMax));
+
+  // Анхны төлөв: газраас дээш шидэх
+  y_m = 0;      // м (газрын дээр)
+  v   = v0;     // м/с (дээш +)
+  t   = 0;
+  running = true;
+  lastTS = null;
+  pausedAtApex = false;
+  fallingPhase = false;
+  document.getElementById('btnContinue').style.display = 'none';
+
+  drawScene();
+  requestAnimationFrame(step);
+}
+
+function continueFall(){
+  if (pausedAtApex) {
+    // Оргил дээрээс амраад буцаад унахыг үргэлжлүүлнэ (v=0-оос эхэлж, a=-g → v сөрөг болно)
+    fallingPhase = true;
+    running = true;
+    pausedAtApex = false;
+    lastTS = null;
+    requestAnimationFrame(step);
+  }
+}
+
+/* ----- Event listeners ----- */
+document.getElementById('btnStart').addEventListener('click', start);
+document.getElementById('btnContinue').addEventListener('click', continueFall);
+
+/* Анхны зурвалт */
+y_m = 0; v = 0; drawScene();
+</script>
+</body>
+</html>
